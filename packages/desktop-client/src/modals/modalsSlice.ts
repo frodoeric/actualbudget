@@ -609,6 +609,14 @@ export type Modal =
       };
     }
   | {
+      name: 'confirm-bulk-categorize-rule';
+      options: {
+        message: string;
+        onConfirm: () => void;
+        onCancel?: () => void;
+      };
+    }
+  | {
       name: 'copy-widget-to-dashboard';
       options: {
         onSelect: (dashboardId: string) => void;

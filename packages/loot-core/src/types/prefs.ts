@@ -11,7 +11,8 @@ export type FeatureFlag =
   | 'sankeyReport'
   | 'akahuBankSync'
   | 'mobileCalculator'
-  | 'monteCarloReport';
+  | 'monteCarloReport'
+  | 'autoRuleOnCategorize';
 
 /**
  * Cross-device preferences. These sync across devices when they are changed.

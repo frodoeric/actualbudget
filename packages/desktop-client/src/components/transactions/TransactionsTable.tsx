@@ -72,7 +72,10 @@ import type {
   AccountEntity,
   CategoryEntity,
   CategoryGroupEntity,
+  NewRuleEntity,
   PayeeEntity,
+  RuleActionEntity,
+  RuleConditionEntity,
   RuleEntity,
   ScheduleEntity,
   TransactionEntity,
@@ -122,6 +125,7 @@ import type {
   OnDragChangeCallback,
   OnDropCallback,
 } from '#hooks/useDragDrop';
+import { useFeatureFlag } from '#hooks/useFeatureFlag';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useMergedRefs } from '#hooks/useMergedRefs';
 import { usePrevious } from '#hooks/usePrevious';
@@ -993,7 +997,7 @@ type TransactionProps = {
     subTxs: TransactionEntity[] | null,
     name: string,
   ) => void;
-  onEdit: (id: TransactionEntity['id'], field: string) => void;
+  onEdit: (id: TransactionEntity['id'] | null, field?: string) => void;
   onDelete: (id: TransactionEntity['id']) => void;
   onBatchDelete?: (ids: TransactionEntity['id'][]) => void;
   onBatchDuplicate?: (ids: TransactionEntity['id'][]) => void;
@@ -1352,6 +1356,114 @@ const Transaction = memo(function Transaction({
   const account = accounts && accountId && getAccountsById(accounts)[accountId];
 
   const isChild = transaction.is_child;
+
+  const autoRuleOnCategorize = useFeatureFlag('autoRuleOnCategorize');
+  // Dedupes against CustomCell re-firing onUpdate with the same value on
+  // blur right after the category was just selected (see CustomCell's
+  // onBlur_ in #components/table).
+  const offeredBulkCategorizeRef = useRef<string | null>(null);
+
+  // Opening the confirm-bulk-categorize-rule modal mid-edit interrupts the
+  // table's own focus/blur cycle for the exposed category cell (it's kept
+  // exposed across modals so it can be re-focused when they close). Once we
+  // decide to close the cell ourselves, defer past the table's own
+  // Enter/Tab handling and drop focus from whatever the modal left focused.
+  const closeCategoryEdit = () => {
+    setTimeout(() => {
+      onEdit(null);
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    }, 0);
+  };
+
+  const offerBulkCategorizeRule = async (
+    newCategoryId: string,
+    categorizedPayeeId: string,
+  ) => {
+    const payeeName = payee?.name;
+    const categoryName = getCategoriesById(categoryGroups)[newCategoryId]?.name;
+    if (!payeeName || !categoryName) {
+      return;
+    }
+
+    const { data: otherTransactions } = (await aqlQuery(
+      q('transactions')
+        .filter({
+          payee: categorizedPayeeId,
+          category: null,
+          is_child: false,
+          id: { $ne: id },
+        })
+        .select('*'),
+    )) as { data: TransactionEntity[] };
+
+    const message =
+      otherTransactions.length > 0
+        ? t(
+            'Always categorize "{{payeeName}}" as "{{categoryName}}"? This will also categorize {{count}} other uncategorized transaction(s) from this payee.',
+            { payeeName, categoryName, count: otherTransactions.length },
+          )
+        : t('Always categorize "{{payeeName}}" as "{{categoryName}}"?', {
+            payeeName,
+            categoryName,
+          });
+
+    dispatch(
+      pushModal({
+        modal: {
+          name: 'confirm-bulk-categorize-rule',
+          options: {
+            message,
+            onConfirm: async () => {
+              const rule = {
+                stage: null,
+                conditionsOp: 'and',
+                conditions: [
+                  {
+                    field: 'payee',
+                    op: 'is',
+                    value: categorizedPayeeId,
+                    type: 'id',
+                  } satisfies RuleConditionEntity,
+                ],
+                actions: [
+                  {
+                    op: 'set',
+                    field: 'category',
+                    value: newCategoryId,
+                    type: 'id',
+                  } satisfies RuleActionEntity,
+                ],
+              } satisfies NewRuleEntity;
+
+              const result = await send('rule-add', rule);
+              if ('error' in result) {
+                dispatch(
+                  addNotification({
+                    notification: {
+                      type: 'error',
+                      message: t('Failed to create rule'),
+                    },
+                  }),
+                );
+              } else if (otherTransactions.length > 0) {
+                await send('rule-apply-actions', {
+                  transactions: otherTransactions,
+                  actions: rule.actions,
+                });
+              }
+              closeCategoryEdit();
+            },
+            onCancel: () => {
+              closeCategoryEdit();
+            },
+          },
+        },
+      }),
+    );
+  };
+
   const transferAcct =
     isTemporaryId(id) && payee?.transfer_acct
       ? getAccountsById(accounts)[payee.transfer_acct]
@@ -1920,7 +2032,23 @@ const Transaction = memo(function Transaction({
               if (value === 'split') {
                 onSplit(transaction.id);
               } else {
+                const wasUncategorized = !categoryId;
                 onUpdate('category', value);
+
+                if (
+                  autoRuleOnCategorize &&
+                  wasUncategorized &&
+                  value &&
+                  payeeId &&
+                  !isPreview &&
+                  !isChild
+                ) {
+                  const offerKey = `${id}:${value}`;
+                  if (offeredBulkCategorizeRef.current !== offerKey) {
+                    offeredBulkCategorizeRef.current = offerKey;
+                    void offerBulkCategorizeRule(value, payeeId);
+                  }
+                }
               }
             }}
           >
@@ -2353,7 +2481,7 @@ type NewTransactionProps = {
   onCreatePayee: (name: string) => Promise<null | PayeeEntity['id']>;
   onDelete: (id: TransactionEntity['id']) => void;
   onDistributeRemainder: (id: TransactionEntity['id']) => void;
-  onEdit: (id: TransactionEntity['id'], field: string) => void;
+  onEdit: (id: TransactionEntity['id'] | null, field?: string) => void;
   onManagePayees: (id: PayeeEntity['id'] | undefined) => void;
   onNavigateToSchedule: (id: ScheduleEntity['id']) => void;
   onNavigateToTransferAccount: (id: AccountEntity['id']) => void;
