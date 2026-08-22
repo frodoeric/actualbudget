@@ -1361,7 +1361,7 @@ const Transaction = memo(function Transaction({
   // Dedupes against CustomCell re-firing onUpdate with the same value on
   // blur right after the category was just selected (see CustomCell's
   // onBlur_ in #components/table).
-  const offeredBulkCategorizeRef = useRef<string | null>(null);
+  const offeredRuleActionRef = useRef<string | null>(null);
 
   // Opening the confirm-bulk-categorize-rule modal mid-edit interrupts the
   // table's own focus/blur cycle for the exposed category cell (it's kept
@@ -1377,7 +1377,7 @@ const Transaction = memo(function Transaction({
     }, 0);
   };
 
-  const offerBulkCategorizeRule = async (
+  const offerCreateRule = async (
     newCategoryId: string,
     categorizedPayeeId: string,
   ) => {
@@ -1414,7 +1414,9 @@ const Transaction = memo(function Transaction({
         modal: {
           name: 'confirm-bulk-categorize-rule',
           options: {
+            title: t('Create rule?'),
             message,
+            confirmLabel: t('Create rule'),
             onConfirm: async () => {
               const rule = {
                 stage: null,
@@ -1456,6 +1458,221 @@ const Transaction = memo(function Transaction({
               closeCategoryEdit();
             },
             onCancel: () => {
+              dispatch(
+                addNotification({
+                  notification: {
+                    type: 'message',
+                    message: t(
+                      'Categorized as "{{categoryName}}". No rule was created for "{{payeeName}}".',
+                      { categoryName, payeeName },
+                    ),
+                  },
+                }),
+              );
+              closeCategoryEdit();
+            },
+          },
+        },
+      }),
+    );
+  };
+
+  // When a rule this feature owns (see isSimplePayeeCategoryRule) exists for
+  // this payee, offer to repoint it at the newly picked category instead of
+  // leaving it pointed at the old one.
+  const offerUpdateRule = async (
+    oldCategoryId: string,
+    newCategoryId: string,
+    categorizedPayeeId: string,
+  ) => {
+    const payeeName = payee?.name;
+    const oldCategoryName =
+      getCategoriesById(categoryGroups)[oldCategoryId]?.name;
+    const newCategoryName =
+      getCategoriesById(categoryGroups)[newCategoryId]?.name;
+    if (!payeeName || !oldCategoryName || !newCategoryName) {
+      return;
+    }
+
+    const { simpleRules, hasOtherRules } =
+      await getSimplePayeeCategoryRules(categorizedPayeeId);
+    const rule = simpleRules.find(
+      r =>
+        r.actions.find(a => a.op === 'set' && a.field === 'category')?.value !==
+        newCategoryId,
+    );
+    if (!rule) {
+      return;
+    }
+
+    const note = hasOtherRules
+      ? t('There are other rules for this payee that were not changed.')
+      : undefined;
+
+    dispatch(
+      pushModal({
+        modal: {
+          name: 'confirm-bulk-categorize-rule',
+          options: {
+            title: t('Update rule?'),
+            message: t(
+              'Update the rule that categorizes "{{payeeName}}" to use "{{newCategoryName}}" instead of "{{oldCategoryName}}"?',
+              { payeeName, oldCategoryName, newCategoryName },
+            ),
+            note,
+            confirmLabel: t('Update rule'),
+            showApplyToAll: true,
+            applyToAllLabel: t(
+              'Also update other transactions from this payee currently categorized as "{{oldCategoryName}}"',
+              { oldCategoryName },
+            ),
+            onConfirm: async applyToAll => {
+              const updatedRule = {
+                ...rule,
+                actions: rule.actions.map(a =>
+                  a.op === 'set' && a.field === 'category'
+                    ? { ...a, value: newCategoryId }
+                    : a,
+                ),
+              };
+
+              const result = await send('rule-update', updatedRule);
+              if ('error' in result) {
+                dispatch(
+                  addNotification({
+                    notification: {
+                      type: 'error',
+                      message: t('Failed to update rule'),
+                    },
+                  }),
+                );
+              } else if (applyToAll) {
+                const { data: otherTransactions } = (await aqlQuery(
+                  q('transactions')
+                    .filter({
+                      payee: categorizedPayeeId,
+                      category: oldCategoryId,
+                      is_child: false,
+                      id: { $ne: id },
+                    })
+                    .select('*'),
+                )) as { data: TransactionEntity[] };
+
+                if (otherTransactions.length > 0) {
+                  await send('rule-apply-actions', {
+                    transactions: otherTransactions,
+                    actions: updatedRule.actions,
+                  });
+                }
+              }
+              closeCategoryEdit();
+            },
+            onCancel: () => {
+              dispatch(
+                addNotification({
+                  notification: {
+                    type: 'message',
+                    message: t(
+                      'Categorized as "{{newCategoryName}}". The rule was not updated.',
+                      { newCategoryName },
+                    ),
+                  },
+                }),
+              );
+              closeCategoryEdit();
+            },
+          },
+        },
+      }),
+    );
+  };
+
+  // A rule can't set a category to blank, so when the matching rule's
+  // category is cleared on a transaction, the logical move is to delete it
+  // rather than leave a rule that can never apply cleanly again.
+  const offerDeleteRule = async (
+    oldCategoryId: string,
+    categorizedPayeeId: string,
+  ) => {
+    const payeeName = payee?.name;
+    const oldCategoryName =
+      getCategoriesById(categoryGroups)[oldCategoryId]?.name;
+    if (!payeeName || !oldCategoryName) {
+      return;
+    }
+
+    const { simpleRules, hasOtherRules } =
+      await getSimplePayeeCategoryRules(categorizedPayeeId);
+    const rule = simpleRules.find(
+      r =>
+        r.actions.find(a => a.op === 'set' && a.field === 'category')?.value ===
+        oldCategoryId,
+    );
+    if (!rule) {
+      return;
+    }
+
+    const note = hasOtherRules
+      ? t('There are other rules for this payee that were not changed.')
+      : undefined;
+
+    dispatch(
+      pushModal({
+        modal: {
+          name: 'confirm-bulk-categorize-rule',
+          options: {
+            title: t('Delete rule?'),
+            message: t(
+              'Delete the rule that always categorizes "{{payeeName}}" as "{{oldCategoryName}}"? A rule can\'t leave the category blank, so it needs to be removed instead.',
+              { payeeName, oldCategoryName },
+            ),
+            note,
+            confirmLabel: t('Delete rule'),
+            showApplyToAll: true,
+            applyToAllLabel: t(
+              'Also clear the category on other transactions from this payee currently categorized as "{{oldCategoryName}}"',
+              { oldCategoryName },
+            ),
+            onConfirm: async applyToAll => {
+              await send('rule-delete', rule.id);
+
+              if (applyToAll) {
+                const { data: otherTransactions } = (await aqlQuery(
+                  q('transactions')
+                    .filter({
+                      payee: categorizedPayeeId,
+                      category: oldCategoryId,
+                      is_child: false,
+                      id: { $ne: id },
+                    })
+                    .select('*'),
+                )) as { data: TransactionEntity[] };
+
+                if (otherTransactions.length > 0) {
+                  await send('transactions-batch-update', {
+                    // `category` is typed as `string | undefined`, but the
+                    // server treats an explicit `null` (not an absent key)
+                    // as "clear the category" — see batchUpdateTransactions
+                    // in loot-core/server/transactions/index.ts.
+                    updated: otherTransactions.map(t => ({
+                      id: t.id,
+                      category: null as unknown as CategoryEntity['id'],
+                    })),
+                    runTransfers: false,
+                  });
+                }
+              }
+              closeCategoryEdit();
+            },
+            onCancel: () => {
+              dispatch(
+                addNotification({
+                  notification: {
+                    type: 'message',
+                    message: t('Category removed. The rule was not deleted.'),
+                  },
+                }),
+              );
               closeCategoryEdit();
             },
           },
@@ -2032,21 +2249,25 @@ const Transaction = memo(function Transaction({
               if (value === 'split') {
                 onSplit(transaction.id);
               } else {
-                const wasUncategorized = !categoryId;
+                const previousCategoryId = categoryId;
                 onUpdate('category', value);
 
-                if (
-                  autoRuleOnCategorize &&
-                  wasUncategorized &&
-                  value &&
-                  payeeId &&
-                  !isPreview &&
-                  !isChild
-                ) {
-                  const offerKey = `${id}:${value}`;
-                  if (offeredBulkCategorizeRef.current !== offerKey) {
-                    offeredBulkCategorizeRef.current = offerKey;
-                    void offerBulkCategorizeRule(value, payeeId);
+                if (autoRuleOnCategorize && payeeId && !isPreview && !isChild) {
+                  const offerKey = `${id}:${previousCategoryId ?? ''}:${value}`;
+                  if (offeredRuleActionRef.current !== offerKey) {
+                    offeredRuleActionRef.current = offerKey;
+
+                    if (!previousCategoryId && value) {
+                      void offerCreateRule(value, payeeId);
+                    } else if (
+                      previousCategoryId &&
+                      value &&
+                      value !== previousCategoryId
+                    ) {
+                      void offerUpdateRule(previousCategoryId, value, payeeId);
+                    } else if (previousCategoryId && !value) {
+                      void offerDeleteRule(previousCategoryId, payeeId);
+                    }
                   }
                 }
               }
@@ -3981,3 +4202,29 @@ const getGroupByCatId = memoizeOne(
     return res;
   },
 );
+
+// A rule this feature can safely rewrite or delete on its own: exactly the
+// payee-is-X condition and single set-category action it creates itself.
+// Anything with extra conditions or actions was hand-built by the user, so
+// it's left untouched.
+function isSimplePayeeCategoryRule(rule: RuleEntity, payeeId: string) {
+  const [condition] = rule.conditions;
+  const [action] = rule.actions;
+  return (
+    rule.conditions.length === 1 &&
+    condition.field === 'payee' &&
+    condition.op === 'is' &&
+    condition.value === payeeId &&
+    rule.actions.length === 1 &&
+    action.op === 'set' &&
+    action.field === 'category'
+  );
+}
+
+async function getSimplePayeeCategoryRules(payeeId: string) {
+  const allRules = await send('payees-get-rules', { id: payeeId });
+  const simpleRules = allRules.filter(rule =>
+    isSimplePayeeCategoryRule(rule, payeeId),
+  );
+  return { simpleRules, hasOtherRules: allRules.length > simpleRules.length };
+}

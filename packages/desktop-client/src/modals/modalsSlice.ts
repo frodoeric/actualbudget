@@ -611,8 +611,13 @@ export type Modal =
   | {
       name: 'confirm-bulk-categorize-rule';
       options: {
+        title?: string;
         message: string;
-        onConfirm: () => void;
+        note?: string;
+        confirmLabel?: string;
+        showApplyToAll?: boolean;
+        applyToAllLabel?: string;
+        onConfirm: (applyToAll: boolean) => void;
         onCancel?: () => void;
       };
     }
