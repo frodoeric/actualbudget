@@ -1456,6 +1456,17 @@ const Transaction = memo(function Transaction({
               closeCategoryEdit();
             },
             onCancel: () => {
+              dispatch(
+                addNotification({
+                  notification: {
+                    type: 'message',
+                    message: t(
+                      'Categorized as "{{categoryName}}". No rule was created for "{{payeeName}}".',
+                      { categoryName, payeeName },
+                    ),
+                  },
+                }),
+              );
               closeCategoryEdit();
             },
           },
