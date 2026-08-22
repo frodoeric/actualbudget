@@ -19,8 +19,8 @@ export type SerializedTransaction = Omit<TransactionEntity, 'date'> & {
 };
 
 export type TransactionEditFunction = (
-  id: TransactionEntity['id'],
-  name: string,
+  id: TransactionEntity['id'] | null,
+  name?: string,
 ) => void;
 
 export type TransactionUpdateFunction = <T extends keyof SerializedTransaction>(
