@@ -160,18 +160,22 @@ async function stagePublicData(): Promise<void> {
 const lootCoreBackend = (): Plugin => ({
   name: 'loot-core-backend',
   configureServer(server) {
+    // On Windows `yarn` resolves to `yarn.cmd`, which spawn() can only run
+    // through a shell. The shell splits arguments on spaces, so quote the
+    // config path when going through it.
+    const isWindows = process.platform === 'win32';
     const child: ChildProcess = spawn(
       'yarn',
       [
         'vite',
         'build',
         '--config',
-        lootCoreConfig,
+        isWindows ? `"${lootCoreConfig}"` : lootCoreConfig,
         '--mode',
         'development',
         '--watch',
       ],
-      { cwd: lootCoreRoot, stdio: 'inherit' },
+      { cwd: lootCoreRoot, stdio: 'inherit', shell: isWindows },
     );
     child.on('error', err => {
       server.config.logger.error(
