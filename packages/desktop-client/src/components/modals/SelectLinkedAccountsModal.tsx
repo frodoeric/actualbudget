@@ -3,6 +3,7 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
+import { SvgExclamationOutline } from '@actual-app/components/icons/v1';
 import { Input } from '@actual-app/components/input';
 import { SpaceBetween } from '@actual-app/components/space-between';
 import { styles } from '@actual-app/components/styles';
@@ -29,13 +30,13 @@ import {
   useLinkAccountSimpleFinMutation,
   useUnlinkAccountMutation,
 } from '#accounts';
+import { Warning } from '#components/alerts';
 import { Autocomplete } from '#components/autocomplete/Autocomplete';
 import type { AutocompleteItem } from '#components/autocomplete/Autocomplete';
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
 import { Cell, Field, Row, Table, TableHeader } from '#components/table';
-import { AmountInput } from '#components/util/AmountInput';
 import { useAccounts } from '#hooks/useAccounts';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
@@ -43,6 +44,8 @@ import { closeModal } from '#modals/modalsSlice';
 import { transactions } from '#queries';
 import { liveQuery } from '#queries/liveQuery';
 import { useDispatch } from '#redux';
+
+import { LinkAccountStartingBalanceInput } from './LinkAccountStartingBalanceInput';
 
 function useAddBudgetAccountOptions() {
   const { t } = useTranslation();
@@ -107,6 +110,50 @@ function isNewAccountOption(
   return (
     chosenAccountId === addOnBudgetOptionId ||
     chosenAccountId === addOffBudgetOptionId
+  );
+}
+
+/**
+ * Starting options the user can set when an external account is linked as a
+ * new Actual account. `amount` is `null` while the starting balance should be
+ * calculated automatically (bank balance minus the imported transactions).
+ */
+export type StartingSettings = {
+  date: string;
+  amount: number | null;
+};
+
+/**
+ * Translates the starting settings of a row into the link mutation params.
+ * Anything not explicitly set by the user stays `undefined` so the sync logic
+ * falls back to its defaults — in particular, changing only the starting date
+ * must not turn the automatically calculated starting balance into 0.
+ */
+export function getStartingOptionsForLink(
+  settings: StartingSettings | undefined,
+): { startingDate: string | undefined; startingBalance: number | undefined } {
+  const date = settings?.date?.trim();
+  return {
+    startingDate: date ? date : undefined,
+    startingBalance: settings?.amount ?? undefined,
+  };
+}
+
+/**
+ * Whether linking `externalAccountId` to `localAccount` would replace an
+ * existing link to a *different* bank account. Transactions of the local
+ * account are kept in that case and the new feed is merged into them, which
+ * is rarely what the user wants unless it really is the same bank account
+ * (e.g. after re-authorizing a provider that rotates account IDs).
+ */
+export function isRelinkToDifferentBankAccount(
+  localAccount: Pick<AccountEntity, 'account_id'> | undefined,
+  externalAccountId: string,
+): boolean {
+  return (
+    localAccount?.account_id != null &&
+    localAccount.account_id !== '' &&
+    localAccount.account_id !== externalAccountId
   );
 }
 
@@ -270,7 +317,7 @@ export function SelectLinkedAccountsModal({
     initiallyChosenAccounts,
   );
   const [customStartingDates, setCustomStartingDates] = useState<
-    Record<string, StartingBalanceInfo>
+    Record<string, StartingSettings>
   >({});
   const { addOnBudgetAccountOption, addOffBudgetAccountOption } =
     useAddBudgetAccountOptions();
@@ -308,13 +355,9 @@ export function SelectLinkedAccountsModal({
         }
 
         // Finally link the matched account
-        const customSettings = customStartingDates[chosenExternalAccountId];
-        const startingDate =
-          customSettings?.date && customSettings.date.trim() !== ''
-            ? customSettings.date
-            : undefined;
-        const startingBalance =
-          customSettings?.amount != null ? customSettings.amount : undefined;
+        const { startingDate, startingBalance } = getStartingOptionsForLink(
+          customStartingDates[chosenExternalAccountId],
+        );
 
         if (propsWithSortedExternalAccounts.syncSource === 'simpleFin') {
           linkAccountSimpleFin.mutate({
@@ -459,10 +502,11 @@ export function SelectLinkedAccountsModal({
   };
 
   // Memoize default starting settings to avoid repeated calculations
-  const defaultStartingSettings = useMemo<StartingBalanceInfo>(
+  const defaultStartingSettings = useMemo<StartingSettings>(
     () => ({
       date: subDays(currentDay(), 89),
-      amount: 0,
+      // Calculated automatically unless the user enters a balance
+      amount: null,
     }),
     [],
   );
@@ -477,7 +521,7 @@ export function SelectLinkedAccountsModal({
 
   const setCustomStartingDate = (
     accountId: string,
-    settings: StartingBalanceInfo,
+    settings: StartingSettings,
   ) => {
     setCustomStartingDates(prev => ({
       ...prev,
@@ -569,7 +613,7 @@ export function SelectLinkedAccountsModal({
               <TableHeader>
                 <Cell value={t('Institution to Sync')} width={150} />
                 <Cell value={t('Bank Account To Sync')} width={150} />
-                <Cell value={t('Balance')} width={120} />
+                <Cell value={t('Current Balance')} width={120} />
                 <Cell value={t('Account in Actual')} width="flex" />
                 <Cell value={t('Starting Date')} width={120} />
                 <Cell value={t('Starting Balance')} width={120} />
@@ -672,13 +716,43 @@ type SharedAccountRowProps = {
 };
 
 type TableRowProps = SharedAccountRowProps & {
-  customStartingDate: StartingBalanceInfo;
+  customStartingDate: StartingSettings;
   onSetCustomStartingDate: (
     accountId: string,
-    settings: StartingBalanceInfo,
+    settings: StartingSettings,
   ) => void;
   showStartingOptions: boolean;
 };
+
+/**
+ * Warning shown when the chosen Actual account is already linked to a
+ * different bank account, which would merge the new feed into its existing
+ * transactions.
+ */
+function useRelinkWarning(
+  externalAccount: ExternalAccount,
+  chosenAccount: { id: string; name: string } | undefined,
+  localAccounts: AccountEntity[],
+) {
+  const { t } = useTranslation();
+
+  const chosenLocalAccount = localAccounts.find(
+    account => account.id === chosenAccount?.id,
+  );
+  if (
+    !isRelinkToDifferentBankAccount(
+      chosenLocalAccount,
+      externalAccount.account_id,
+    )
+  ) {
+    return null;
+  }
+
+  return t(
+    '{{account}} is currently linked to a different bank account. Its existing transactions will be kept and the transactions of this bank account will be added to them. Make sure this is the same bank account.',
+    { account: chosenLocalAccount?.name },
+  );
+}
 
 function useStartingBalanceInfo(accountId: string | undefined) {
   const [info, setInfo] = useState<StartingBalanceInfo | null>(null);
@@ -730,6 +804,11 @@ function TableRow({
   const { t } = useTranslation();
   const startingBalanceInfo = useStartingBalanceInfo(
     showStartingOptions ? undefined : chosenAccount?.id,
+  );
+  const relinkWarning = useRelinkWarning(
+    externalAccount,
+    chosenAccount,
+    localAccounts,
   );
 
   const availableAccountOptions = getSelectableAccountOptions({
@@ -786,7 +865,7 @@ function TableRow({
       {/* Account in Actual */}
       <Field
         width="flex"
-        truncate={focusedField !== 'account'}
+        truncate={focusedField !== 'account' && !relinkWarning}
         onClick={() => setFocusedField('account')}
       >
         {focusedField === 'account' ? (
@@ -803,6 +882,32 @@ function TableRow({
             }}
             value={chosenAccount?.id}
           />
+        ) : relinkWarning ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              overflow: 'hidden',
+            }}
+          >
+            <Text
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {chosenAccount?.name}
+            </Text>
+            <Tooltip content={relinkWarning}>
+              <SvgExclamationOutline
+                width={13}
+                height={13}
+                style={{ color: theme.warningText, flexShrink: 0 }}
+              />
+            </Tooltip>
+          </View>
         ) : (
           chosenAccount?.name
         )}
@@ -892,10 +997,10 @@ function getInstitutionName(
 type StartingOptionsFieldsProps = {
   accountId: string;
   externalBalance: number | null | undefined;
-  customStartingDate: StartingBalanceInfo;
+  customStartingDate: StartingSettings;
   onSetCustomStartingDate: (
     accountId: string,
-    settings: StartingBalanceInfo,
+    settings: StartingSettings,
   ) => void;
   layout: 'inline' | 'stacked';
 };
@@ -907,7 +1012,33 @@ function StartingOptionsFields({
   onSetCustomStartingDate,
   layout,
 }: StartingOptionsFieldsProps) {
+  const { t } = useTranslation();
   const zeroSign = externalBalance != null && externalBalance < 0 ? '-' : '+';
+  const isAutomaticBalance = customStartingDate.amount == null;
+  const startingBalanceHelp = isAutomaticBalance
+    ? t(
+        'Calculated automatically from the current bank balance minus the imported transactions. Click to enter the balance on the starting date yourself.',
+      )
+    : t(
+        'The balance of the bank account on the starting date. Clear the field to calculate it automatically.',
+      );
+
+  const startingBalanceInput = (
+    <LinkAccountStartingBalanceInput
+      value={customStartingDate.amount}
+      zeroSign={zeroSign}
+      onChange={amount =>
+        onSetCustomStartingDate(accountId, {
+          ...customStartingDate,
+          amount,
+        })
+      }
+      style={{
+        width: '100%',
+        justifyContent: layout === 'inline' ? 'flex-end' : 'flex-start',
+      }}
+    />
+  );
 
   if (layout === 'inline') {
     return (
@@ -928,17 +1059,9 @@ function StartingOptionsFields({
         </Field>
         {/* Starting Balance */}
         <Field width={120} truncate={false} style={{ textAlign: 'right' }}>
-          <AmountInput
-            value={customStartingDate.amount}
-            zeroSign={zeroSign}
-            onUpdate={amount =>
-              onSetCustomStartingDate(accountId, {
-                ...customStartingDate,
-                amount,
-              })
-            }
-            style={{ width: '100%' }}
-          />
+          <Tooltip content={startingBalanceHelp}>
+            {startingBalanceInput}
+          </Tooltip>
         </Field>
       </>
     );
@@ -986,17 +1109,16 @@ function StartingOptionsFields({
           >
             <Trans>Balance on that date:</Trans>
           </Text>
-          <AmountInput
-            value={customStartingDate.amount}
-            zeroSign={zeroSign}
-            onUpdate={amount =>
-              onSetCustomStartingDate(accountId, {
-                ...customStartingDate,
-                amount,
-              })
-            }
-            style={{ width: '100%' }}
-          />
+          {startingBalanceInput}
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 12,
+              color: theme.pageTextSubdued,
+            }}
+          >
+            {startingBalanceHelp}
+          </Text>
         </View>
       </View>
     </View>
@@ -1004,10 +1126,10 @@ function StartingOptionsFields({
 }
 
 type AccountCardProps = SharedAccountRowProps & {
-  customStartingDate: StartingBalanceInfo;
+  customStartingDate: StartingSettings;
   onSetCustomStartingDate: (
     accountId: string,
-    settings: StartingBalanceInfo,
+    settings: StartingSettings,
   ) => void;
 };
 
@@ -1045,6 +1167,11 @@ function AccountCard({
   );
   const startingBalanceInfo = useStartingBalanceInfo(
     shouldShowStartingOptions ? undefined : chosenAccount?.id,
+  );
+  const relinkWarning = useRelinkWarning(
+    externalAccount,
+    chosenAccount,
+    localAccounts,
   );
 
   return (
@@ -1089,7 +1216,7 @@ function AccountCard({
           color: theme.pageTextSubdued,
         }}
       >
-        <Trans>Balance:</Trans>{' '}
+        <Trans>Current balance:</Trans>{' '}
         <PrivacyFilter>
           {externalAccount.balance != null ? (
             <FinancialText>
@@ -1122,6 +1249,12 @@ function AccountCard({
           </Text>
         )}
       </SpaceBetween>
+
+      {relinkWarning && (
+        <Warning style={{ padding: '8px 12px', fontSize: 12 }}>
+          {relinkWarning}
+        </Warning>
+      )}
 
       {!shouldShowStartingOptions && startingBalanceInfo && (
         <View

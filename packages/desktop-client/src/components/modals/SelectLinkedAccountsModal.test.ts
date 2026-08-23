@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   computeInitialLinkState,
   getSelectableAccountOptions,
+  getStartingOptionsForLink,
+  isRelinkToDifferentBankAccount,
 } from './SelectLinkedAccountsModal';
 
 function makeLocalAccount(
@@ -156,5 +158,66 @@ describe('getSelectableAccountOptions', () => {
       'Create new account',
       'Create new account (off budget)',
     ]);
+  });
+});
+
+describe('getStartingOptionsForLink', () => {
+  it('leaves everything to the sync defaults when nothing was set', () => {
+    expect(getStartingOptionsForLink(undefined)).toEqual({
+      startingDate: undefined,
+      startingBalance: undefined,
+    });
+  });
+
+  it('keeps the starting balance automatic when only the date was changed', () => {
+    expect(
+      getStartingOptionsForLink({ date: '2026-05-23', amount: null }),
+    ).toEqual({ startingDate: '2026-05-23', startingBalance: undefined });
+  });
+
+  it('passes an explicitly entered starting balance, including zero', () => {
+    expect(
+      getStartingOptionsForLink({ date: '2026-05-23', amount: 3507 }),
+    ).toEqual({ startingDate: '2026-05-23', startingBalance: 3507 });
+    expect(
+      getStartingOptionsForLink({ date: '2026-05-23', amount: 0 }),
+    ).toEqual({ startingDate: '2026-05-23', startingBalance: 0 });
+  });
+
+  it('ignores a blank starting date', () => {
+    expect(getStartingOptionsForLink({ date: '  ', amount: 3507 })).toEqual({
+      startingDate: undefined,
+      startingBalance: 3507,
+    });
+  });
+});
+
+describe('isRelinkToDifferentBankAccount', () => {
+  it('is false for new or manual accounts', () => {
+    expect(isRelinkToDifferentBankAccount(undefined, 'ext-1')).toBe(false);
+    expect(
+      isRelinkToDifferentBankAccount(
+        makeLocalAccount({ id: 'local-1' }),
+        'ext-1',
+      ),
+    ).toBe(false);
+  });
+
+  it('is false when relinking the same bank account', () => {
+    expect(
+      isRelinkToDifferentBankAccount(
+        makeLocalAccount({ id: 'local-1', account_id: 'ext-1' }),
+        'ext-1',
+      ),
+    ).toBe(false);
+  });
+
+  it('is true when the account is linked to another bank account', () => {
+    expect(
+      isRelinkToDifferentBankAccount(
+        makeLocalAccount({ id: 'local-1', account_id: 'ext-1' }),
+        'ext-2',
+      ),
+    ).toBe(true);
   });
 });
