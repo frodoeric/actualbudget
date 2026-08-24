@@ -122,7 +122,7 @@
   },
   "scripts": {
     "start": "cross-env PORT=3001 vite",
-    "start:browser": "cross-env ./bin/watch-browser",
+    "start:browser": "cross-env REACT_APP_BACKEND_WORKER_HASH=dev yarn start --mode=browser",
     "watch": "cross-env BROWSER=none yarn start",
     "build": "vite build",
     "build:browser": "vite build --mode=browser",
