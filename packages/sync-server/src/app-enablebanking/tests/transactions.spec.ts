@@ -172,6 +172,26 @@ describe('POST /transactions for card accounts', () => {
     expect(tx.transactionId).toMatch(/^eb-[0-9a-f]{32}-0$/);
   });
 
+  it('syncs cards like regular accounts when cardAwareSync is disabled', async () => {
+    const detailsSpy = vi.spyOn(enableBankingService, 'getAccountDetails');
+    vi.spyOn(enableBankingService, 'getBalances').mockResolvedValue({
+      balances: mockCardBalancesAllPositive,
+    });
+
+    const res = await request(app).post('/transactions').send({
+      accountId: 'card-acc-flag-off',
+      startDate: '2026-08-01',
+      cardAwareSync: false,
+    });
+
+    // Old behavior: first balance wins (548.70) and dates stay booking dates
+    expect(res.body.data.startingBalance).toBe(54870);
+    const [tx] = res.body.data.transactions.all;
+    expect(tx.date).toBe('2026-08-23');
+    // Card detection is skipped entirely
+    expect(detailsSpy).not.toHaveBeenCalled();
+  });
+
   it('keeps the CLAV balance and booking dates for non-card accounts', async () => {
     vi.spyOn(enableBankingService, 'getAccountDetails').mockResolvedValue({
       cash_account_type: 'CACC',

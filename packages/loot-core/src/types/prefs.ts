@@ -12,7 +12,8 @@ export type FeatureFlag =
   | 'akahuBankSync'
   | 'mobileCalculator'
   | 'monteCarloReport'
-  | 'autoRuleOnCategorize';
+  | 'autoRuleOnCategorize'
+  | 'enableBankingCardSync';
 
 /**
  * Cross-device preferences. These sync across devices when they are changed.

@@ -238,6 +238,14 @@ export function ExperimentalFeatures() {
             >
               <Trans>Enable Banking sync (EU banks)</Trans>
             </FeatureToggle>
+            <FeatureToggle flag="enableBankingCardSync">
+              <Trans>
+                Enable Banking: credit card-aware sync (on by default — credit
+                cards import their real debt instead of the available credit,
+                and use the purchase date instead of the statement date; turn
+                off to sync cards like regular accounts)
+              </Trans>
+            </FeatureToggle>
             <FeatureToggle
               flag="akahuBankSync"
               feedbackLink="https://github.com/actualbudget/actual/issues/8020"
