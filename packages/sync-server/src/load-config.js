@@ -305,6 +305,12 @@ if (process.env.ACTUAL_CONFIG_PATH) {
     `loading config from ACTUAL_CONFIG_PATH: '${process.env.ACTUAL_CONFIG_PATH}'`,
   );
   configPath = process.env.ACTUAL_CONFIG_PATH;
+} else if (process.env.NODE_ENV === 'test') {
+  // Tests must be hermetic: a developer's local config.json can point
+  // serverFiles/userFiles at a live data directory, and the test harness
+  // runs migrations up/down (deleting the account database on teardown)
+  // against whatever these paths resolve to.
+  debug('NODE_ENV is test: skipping config.json');
 } else {
   configPath = path.join(projectRoot, 'config.json');
 
@@ -315,7 +321,7 @@ if (process.env.ACTUAL_CONFIG_PATH) {
   debug(`loading config from default path: '${configPath}'`);
 }
 
-if (fs.existsSync(configPath)) {
+if (configPath && fs.existsSync(configPath)) {
   configSchema.loadFile(configPath);
   debug(`Config loaded`);
 }
