@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import createDebug from 'debug';
 
 import {
@@ -38,7 +40,16 @@ export type EnableBankingSessionAccount = {
   account_servicer?: { bic_fi?: string; name?: string };
   name?: string;
   currency?: string;
+  cash_account_type?: string;
   uid: string;
+};
+
+export type EnableBankingAccountDetails = {
+  uid?: string;
+  cash_account_type?: string;
+  product?: string;
+  currency?: string;
+  credit_limit?: { currency: string; amount: string } | null;
 };
 
 export type EnableBankingSession = {
@@ -205,11 +216,20 @@ function cleanRemittanceArray(arr: string[]): string[] {
 
 export function normalizeTransaction(
   tx: EnableBankingTransaction,
+  opts?: { preferTransactionDate?: boolean },
 ): BankSyncTransaction {
   const transactionId = tx.entry_reference || tx.transaction_id || '';
   const bookingDate =
     tx.booking_date || tx.value_date || tx.transaction_date || '';
   const valueDate = tx.value_date;
+
+  // Card accounts often report booking_date as the statement/processing date
+  // (every entry stamped with the day it hit the statement) while the actual
+  // purchase date is only in transaction_date, so prefer it there.
+  const date =
+    opts?.preferTransactionDate && tx.transaction_date
+      ? tx.transaction_date
+      : bookingDate;
 
   let payeeName = '';
   if (tx.credit_debit_indicator === 'CRDT' && tx.debtor?.name) {
@@ -252,7 +272,7 @@ export function normalizeTransaction(
   return {
     ...tx,
     transactionId,
-    date: bookingDate,
+    date,
     bookingDate,
     valueDate,
     transactionAmount: {
@@ -296,6 +316,109 @@ export function normalizeBalance(bal: EnableBankingBalance): BankSyncBalance {
     balanceType: bal.balance_type,
     referenceDate: bal.reference_date,
   };
+}
+
+export function isCardAccountType(cashAccountType?: string): boolean {
+  return cashAccountType === 'CARD';
+}
+
+// Booked-ish balance types that can legitimately carry a card's debt.
+const CARD_DEBT_BALANCE_TYPES = ['CLBD', 'XPCD', 'ITBD'];
+
+/**
+ * Picks the balance the client should anchor the account's starting balance
+ * on.
+ *
+ * Regular accounts keep the historical behavior: prefer CLAV, fall back to
+ * the first reported balance.
+ *
+ * Card accounts can't trust positive balances: banks report the *available
+ * credit* there (e.g. ActivoBank sends ITAV = remaining limit and OTHR = the
+ * credit limit itself; Santander repeats the available amount in every type).
+ * Treating that as money inflates the budget with funds the user doesn't
+ * have. For cards, in order:
+ *
+ * 1. a *negative* booked-type balance — a real, unambiguous debt figure;
+ * 2. the debt derived from available credit minus the limit (ITAV − OTHR)
+ *    when the bank exposes both and the limit is the larger one;
+ * 3. otherwise anchor at 0 so the account's balance is just the sum of
+ *    imported transactions.
+ */
+export function pickStartingBalance(
+  balances: BankSyncBalance[],
+  isCard: boolean,
+): number {
+  if (!isCard) {
+    const preferred =
+      balances.find(b => b.balanceType === 'CLAV') ?? balances[0];
+    return preferred ? preferred.balanceAmount.amount : 0;
+  }
+
+  for (const type of CARD_DEBT_BALANCE_TYPES) {
+    const candidate = balances.find(
+      b => b.balanceType === type && b.balanceAmount.amount < 0,
+    );
+    if (candidate) {
+      return candidate.balanceAmount.amount;
+    }
+  }
+
+  const available = balances.find(b => b.balanceType === 'ITAV');
+  const limit = balances.find(b => b.balanceType === 'OTHR');
+  if (
+    available &&
+    limit &&
+    limit.balanceAmount.amount > available.balanceAmount.amount
+  ) {
+    return available.balanceAmount.amount - limit.balanceAmount.amount;
+  }
+
+  return 0;
+}
+
+/**
+ * Some banks (e.g. Santander Totta cards) return transactions with neither
+ * entry_reference nor transaction_id. Without an import id, Actual's client
+ * falls back to fuzzy matching (±7 days), which breaks date updates and
+ * re-imports as duplicates. Derive a deterministic id from the transaction's
+ * stable fields so the same bank record always maps to the same import id.
+ * Only booked transactions get one — pending records still change shape (and
+ * would change hash) when they settle.
+ */
+export function assignFallbackTransactionIds(
+  transactions: BankSyncTransaction[],
+  accountUid: string,
+): void {
+  const occurrences = new Map<string, number>();
+
+  for (const tx of transactions) {
+    if (tx.transactionId || !tx.booked) {
+      continue;
+    }
+
+    const hash = createHash('sha256')
+      .update(
+        [
+          accountUid,
+          tx.booking_date ?? '',
+          tx.transaction_date ?? '',
+          tx.value_date ?? '',
+          tx.transactionAmount.amount,
+          tx.transactionAmount.currency,
+          tx.credit_debit_indicator ?? '',
+          (tx.remittance_information ?? []).join('~'),
+        ].join('|'),
+      )
+      .digest('hex')
+      .slice(0, 32);
+
+    // Disambiguate identical same-day purchases (same amount and
+    // description) with a stable occurrence counter.
+    const n = occurrences.get(hash) ?? 0;
+    occurrences.set(hash, n + 1);
+
+    tx.transactionId = `eb-${hash}-${n}`;
+  }
 }
 
 export function normalizeAccount(
@@ -382,6 +505,19 @@ export const enableBankingService = {
     return request<EnableBankingSession>(
       'GET',
       `/sessions/${encodeURIComponent(sessionId)}`,
+    );
+  },
+
+  async getAccountDetails(
+    accountUid: string,
+    psuHeaders?: PsuHeaders,
+  ): Promise<EnableBankingAccountDetails> {
+    return request<EnableBankingAccountDetails>(
+      'GET',
+      `/accounts/${encodeURIComponent(accountUid)}/details`,
+      undefined,
+      undefined,
+      psuHeaders,
     );
   },
 

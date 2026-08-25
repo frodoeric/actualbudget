@@ -128,3 +128,68 @@ export const mockNegativeBalance = {
   balance_type: 'XPCD',
   reference_date: '2026-03-24',
 };
+
+// A credit card transaction as Santander Totta reports them: no ids at all,
+// booking_date stamped with the statement/sync day, and the real purchase
+// date only in transaction_date.
+export const mockCardTransaction = {
+  transaction_amount: { currency: 'EUR', amount: '29.30' },
+  credit_debit_indicator: 'DBIT',
+  status: 'BOOK',
+  booking_date: '2026-08-23',
+  transaction_date: '2026-08-15',
+  remittance_information: ['COMPRA MBW 6726 MBWAY - CINEMAS'],
+} satisfies EnableBankingTransaction;
+
+// ActivoBank-style card balances: ITAV is the remaining credit, OTHR is the
+// credit limit itself, and CLBD is the (zero) accounting balance.
+export const mockCardBalancesAvailableCredit = [
+  {
+    balance_amount: { currency: 'EUR', amount: '2430.66' },
+    balance_type: 'ITAV',
+  },
+  {
+    balance_amount: { currency: 'EUR', amount: '5000' },
+    balance_type: 'OTHR',
+  },
+  {
+    balance_amount: { currency: 'EUR', amount: '0' },
+    balance_type: 'CLBD',
+  },
+];
+
+// Santander-style card balances: the available amount repeated in every type.
+export const mockCardBalancesAllPositive = [
+  {
+    balance_amount: { currency: 'EUR', amount: '548.7' },
+    balance_type: 'ITAV',
+  },
+  {
+    balance_amount: { currency: 'EUR', amount: '548.7' },
+    balance_type: 'OTHR',
+  },
+  {
+    balance_amount: { currency: 'EUR', amount: '548.7' },
+    balance_type: 'CLBD',
+  },
+];
+
+// A card whose bank reports the actual debt as a negative booked balance.
+export const mockCardBalancesWithDebt = [
+  {
+    balance_amount: { currency: 'EUR', amount: '1200' },
+    balance_type: 'ITAV',
+  },
+  {
+    balance_amount: { currency: 'EUR', amount: '-123.45' },
+    balance_type: 'CLBD',
+  },
+];
+
+export const mockCardDetails = {
+  uid: 'card-account-uid',
+  cash_account_type: 'CARD',
+  product: 'VISA CLASSIC',
+  currency: 'EUR',
+  credit_limit: null,
+};

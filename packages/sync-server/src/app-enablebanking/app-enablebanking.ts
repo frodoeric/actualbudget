@@ -16,11 +16,14 @@ import type {
   PsuHeaders,
 } from './services/enablebanking-service';
 import {
+  assignFallbackTransactionIds,
   enableBankingService,
+  isCardAccountType,
   isImportableTransaction,
   normalizeAccount,
   normalizeBalance,
   normalizeTransaction,
+  pickStartingBalance,
 } from './services/enablebanking-service';
 import { EnableBankingError } from './utils/errors';
 
@@ -58,6 +61,42 @@ function extractPsuHeaders(req: Request): PsuHeaders {
   return headers;
 }
 
+// Whether an Enable Banking account is a card, cached per account uid. The
+// account's type never changes, so one successful /details lookup per server
+// process is enough; cards need it to pick sane balances and dates.
+const cardAccountCache = new Map<string, boolean>();
+
+async function resolveIsCard(
+  accountUid: string,
+  psuHeaders?: PsuHeaders,
+  sessionCashAccountType?: string,
+): Promise<boolean> {
+  if (sessionCashAccountType !== undefined) {
+    const isCard = isCardAccountType(sessionCashAccountType);
+    cardAccountCache.set(accountUid, isCard);
+    return isCard;
+  }
+
+  const cached = cardAccountCache.get(accountUid);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  try {
+    const details = await enableBankingService.getAccountDetails(
+      accountUid,
+      psuHeaders,
+    );
+    const isCard = isCardAccountType(details.cash_account_type);
+    cardAccountCache.set(accountUid, isCard);
+    return isCard;
+  } catch (err) {
+    // Don't cache failures — treat as a regular account and retry next time.
+    debug('Failed to fetch details for account %s: %s', accountUid, err);
+    return false;
+  }
+}
+
 async function buildSessionResult(
   session: EnableBankingSession,
   psuHeaders?: PsuHeaders,
@@ -77,12 +116,15 @@ async function buildSessionResult(
         debug('Failed to fetch balances for account %s: %s', account.uid, err);
       }
 
-      const preferredBalance =
-        balances.find(b => b.balanceType === 'CLAV') ?? balances[0];
+      const isCard = await resolveIsCard(
+        account.uid,
+        psuHeaders,
+        account.cash_account_type,
+      );
 
       return {
         ...normalized,
-        balance: preferredBalance ? preferredBalance.balanceAmount.amount : 0,
+        balance: pickStartingBalance(balances, isCard),
         balances,
       };
     }),
@@ -513,6 +555,8 @@ app.post(
           ? startDate
           : new Date(startDate).toISOString().split('T')[0];
 
+      const isCard = await resolveIsCard(accountId, psuHeaders);
+
       // Fetch balances
       const balanceResult = await enableBankingService.getBalances(
         accountId,
@@ -520,13 +564,9 @@ app.post(
       );
       const balances = balanceResult.balances.map(normalizeBalance);
 
-      // Determine starting balance, preferring CLAV balance type
-      let startingBalance = 0;
-      if (balances.length > 0) {
-        const preferredBalance =
-          balances.find(b => b.balanceType === 'CLAV') ?? balances[0];
-        startingBalance = preferredBalance.balanceAmount.amount;
-      }
+      // Determine the balance the client anchors the starting balance on.
+      // Cards must never anchor on a positive "available credit" figure.
+      const startingBalance = pickStartingBalance(balances, isCard);
 
       // Fetch all paginated transactions
       const rawTransactions = await enableBankingService.getAllTransactions(
@@ -541,7 +581,9 @@ app.post(
       const pending: ReturnType<typeof normalizeTransaction>[] = [];
 
       for (const tx of rawTransactions) {
-        const normalized = normalizeTransaction(tx);
+        const normalized = normalizeTransaction(tx, {
+          preferTransactionDate: isCard,
+        });
 
         // Drop records Actual's client can't insert (empty/non-ISO date or
         // non-numeric amount) — one of them would otherwise abort the entire
@@ -563,6 +605,10 @@ app.post(
           pending.push(normalized);
         }
       }
+
+      // Give id-less booked transactions a deterministic import id so the
+      // client can match them exactly instead of fuzzy-matching by date.
+      assignFallbackTransactionIds(all, accountId);
 
       res.send({
         status: 'ok',

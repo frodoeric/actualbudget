@@ -3,6 +3,10 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  mockCardBalancesAllPositive,
+  mockCardBalancesAvailableCredit,
+  mockCardDetails,
+  mockCardTransaction,
   mockDebitTransaction,
   mockPendingTransaction,
   mockPendingTransactionNoDate,
@@ -111,5 +115,78 @@ describe('POST /transactions', () => {
 
     expect(res.body.data.transactions.all).toHaveLength(2);
     expect(ids(res.body.data.transactions.all)).toEqual(['ref-002', 'tx-003']);
+  });
+});
+
+describe('POST /transactions for card accounts', () => {
+  beforeEach(() => {
+    vi.spyOn(enableBankingService, 'getAccountDetails').mockResolvedValue(
+      mockCardDetails,
+    );
+    vi.spyOn(enableBankingService, 'getAllTransactions').mockResolvedValue([
+      mockCardTransaction,
+    ]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('anchors the starting balance on the derived debt, not available credit', async () => {
+    vi.spyOn(enableBankingService, 'getBalances').mockResolvedValue({
+      balances: mockCardBalancesAvailableCredit,
+    });
+
+    const res = await request(app)
+      .post('/transactions')
+      .send({ accountId: 'card-acc-1', startDate: '2026-08-01' });
+
+    expect(res.body.status).toBe('ok');
+    // ITAV 2430.66 − OTHR 5000 (the limit) → −2569.34 owed
+    expect(res.body.data.startingBalance).toBe(-256934);
+  });
+
+  it('anchors at 0 when the bank repeats the available amount in every type', async () => {
+    vi.spyOn(enableBankingService, 'getBalances').mockResolvedValue({
+      balances: mockCardBalancesAllPositive,
+    });
+
+    const res = await request(app)
+      .post('/transactions')
+      .send({ accountId: 'card-acc-2', startDate: '2026-08-01' });
+
+    expect(res.body.data.startingBalance).toBe(0);
+  });
+
+  it('imports card transactions dated by transaction_date with a synthetic id', async () => {
+    vi.spyOn(enableBankingService, 'getBalances').mockResolvedValue({
+      balances: mockCardBalancesAvailableCredit,
+    });
+
+    const res = await request(app)
+      .post('/transactions')
+      .send({ accountId: 'card-acc-3', startDate: '2026-08-01' });
+
+    const [tx] = res.body.data.transactions.all;
+    expect(tx.date).toBe('2026-08-15');
+    expect(tx.transactionId).toMatch(/^eb-[0-9a-f]{32}-0$/);
+  });
+
+  it('keeps the CLAV balance and booking dates for non-card accounts', async () => {
+    vi.spyOn(enableBankingService, 'getAccountDetails').mockResolvedValue({
+      cash_account_type: 'CACC',
+    });
+    vi.spyOn(enableBankingService, 'getBalances').mockResolvedValue({
+      balances: mockCardBalancesAllPositive,
+    });
+
+    const res = await request(app)
+      .post('/transactions')
+      .send({ accountId: 'checking-acc-1', startDate: '2026-08-01' });
+
+    // CLAV wins for regular accounts (548.70 → 54870 cents)
+    expect(res.body.data.startingBalance).toBe(54870);
+    const [tx] = res.body.data.transactions.all;
+    expect(tx.date).toBe('2026-08-23');
   });
 });
