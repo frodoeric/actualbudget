@@ -364,11 +364,20 @@ async function downloadEnableBankingTransactions(
 
   logger.log('Pulling transactions from Enable Banking');
 
+  // On by default; when disabled the server syncs credit cards like regular
+  // accounts (bank-reported balance and booking dates).
+  const cardAwareSync = await aqlQuery(
+    q('preferences')
+      .filter({ id: 'flags.enableBankingCardSync' })
+      .select('value'),
+  ).then(data => String(data?.data?.[0]?.value ?? 'true') === 'true');
+
   const res = await post(
     getServer().ENABLEBANKING_SERVER + '/transactions',
     {
       accountId: acctId,
       startDate: since,
+      cardAwareSync,
     },
     {
       'X-ACTUAL-TOKEN': userToken,

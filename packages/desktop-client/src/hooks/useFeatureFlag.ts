@@ -17,6 +17,9 @@ const DEFAULT_FEATURE_FLAG_STATE: Record<FeatureFlag, boolean> = {
   mobileCalculator: false,
   monteCarloReport: false,
   autoRuleOnCategorize: false,
+  // On by default: without it, credit cards synced through Enable Banking
+  // import their available credit as a positive balance.
+  enableBankingCardSync: true,
 };
 
 export function useFeatureFlag(name: FeatureFlag): boolean {

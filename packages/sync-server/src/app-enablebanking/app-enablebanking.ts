@@ -533,7 +533,7 @@ app.post(
 app.post(
   '/transactions',
   handleError(async (req: Request, res: Response) => {
-    const { accountId, startDate } = req.body || {};
+    const { accountId, startDate, cardAwareSync } = req.body || {};
 
     if (!accountId || !startDate) {
       res.send({
@@ -555,7 +555,13 @@ app.post(
           ? startDate
           : new Date(startDate).toISOString().split('T')[0];
 
-      const isCard = await resolveIsCard(accountId, psuHeaders);
+      // Card-aware handling is on unless the client explicitly disables it
+      // (the `enableBankingCardSync` feature flag); disabled, cards sync like
+      // regular accounts — bank-reported balance and booking dates.
+      const isCard =
+        cardAwareSync === false
+          ? false
+          : await resolveIsCard(accountId, psuHeaders);
 
       // Fetch balances
       const balanceResult = await enableBankingService.getBalances(
