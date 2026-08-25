@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  assignFallbackTransactionIds,
   isImportableTransaction,
   normalizeAccount,
   normalizeBalance,
   normalizeTransaction,
+  pickStartingBalance,
 } from '#app-enablebanking/services/enablebanking-service';
 
 import {
   mockBalance,
+  mockCardBalancesAllPositive,
+  mockCardBalancesAvailableCredit,
+  mockCardBalancesWithDebt,
+  mockCardTransaction,
   mockCreditTransaction,
   mockDebitTransaction,
   mockNegativeBalance,
@@ -261,6 +267,108 @@ describe('normalizeBalance', () => {
       balance_type: 'CLAV',
     });
     expect(result.balanceAmount.amount).toBe(10000);
+  });
+});
+
+describe('normalizeTransaction with preferTransactionDate (card accounts)', () => {
+  it('uses transaction_date as the import date when preferred', () => {
+    const out = normalizeTransaction(mockCardTransaction, {
+      preferTransactionDate: true,
+    });
+    expect(out.date).toBe('2026-08-15');
+    // bookingDate keeps reporting what the bank booked
+    expect(out.bookingDate).toBe('2026-08-23');
+  });
+
+  it('falls back to booking_date when transaction_date is missing', () => {
+    const out = normalizeTransaction(
+      { ...mockCardTransaction, transaction_date: undefined },
+      { preferTransactionDate: true },
+    );
+    expect(out.date).toBe('2026-08-23');
+  });
+
+  it('keeps booking_date as the date when not preferred', () => {
+    const out = normalizeTransaction(mockCardTransaction);
+    expect(out.date).toBe('2026-08-23');
+  });
+});
+
+describe('pickStartingBalance', () => {
+  it('keeps the CLAV-first behavior for regular accounts', () => {
+    const balances = [mockNegativeBalance, mockBalance].map(normalizeBalance);
+    expect(pickStartingBalance(balances, false)).toBe(123456);
+  });
+
+  it('falls back to the first balance for regular accounts without CLAV', () => {
+    const balances = [mockNegativeBalance].map(normalizeBalance);
+    expect(pickStartingBalance(balances, false)).toBe(-5075);
+  });
+
+  it('returns 0 for regular accounts without balances', () => {
+    expect(pickStartingBalance([], false)).toBe(0);
+  });
+
+  it('derives the card debt from available credit minus limit (ActivoBank shape)', () => {
+    const balances = mockCardBalancesAvailableCredit.map(normalizeBalance);
+    // ITAV 2430.66 − OTHR 5000 → −2569.34 owed
+    expect(pickStartingBalance(balances, true)).toBe(-256934);
+  });
+
+  it('anchors a card at 0 when every balance is positive (Santander shape)', () => {
+    const balances = mockCardBalancesAllPositive.map(normalizeBalance);
+    expect(pickStartingBalance(balances, true)).toBe(0);
+  });
+
+  it('uses a negative booked balance as the card debt when reported', () => {
+    const balances = mockCardBalancesWithDebt.map(normalizeBalance);
+    expect(pickStartingBalance(balances, true)).toBe(-12345);
+  });
+});
+
+describe('assignFallbackTransactionIds', () => {
+  it('assigns a deterministic id to booked transactions without ids', () => {
+    const first = [normalizeTransaction(mockCardTransaction)];
+    const second = [normalizeTransaction(mockCardTransaction)];
+    assignFallbackTransactionIds(first, 'acct-uid');
+    assignFallbackTransactionIds(second, 'acct-uid');
+
+    expect(first[0].transactionId).toMatch(/^eb-[0-9a-f]{32}-0$/);
+    expect(second[0].transactionId).toBe(first[0].transactionId);
+  });
+
+  it('disambiguates identical transactions with an occurrence counter', () => {
+    const txs = [
+      normalizeTransaction(mockCardTransaction),
+      normalizeTransaction(mockCardTransaction),
+    ];
+    assignFallbackTransactionIds(txs, 'acct-uid');
+    expect(txs[0].transactionId).not.toBe(txs[1].transactionId);
+    expect(txs[1].transactionId.endsWith('-1')).toBe(true);
+  });
+
+  it('scopes ids to the account', () => {
+    const a = [normalizeTransaction(mockCardTransaction)];
+    const b = [normalizeTransaction(mockCardTransaction)];
+    assignFallbackTransactionIds(a, 'acct-a');
+    assignFallbackTransactionIds(b, 'acct-b');
+    expect(a[0].transactionId).not.toBe(b[0].transactionId);
+  });
+
+  it('leaves bank-provided ids and pending transactions untouched', () => {
+    const withId = normalizeTransaction(mockDebitTransaction);
+    const pending = normalizeTransaction(mockPendingTransactionNoDate);
+    const txs = [withId, pending];
+    assignFallbackTransactionIds(txs, 'acct-uid');
+    expect(withId.transactionId).toBe('ref-002');
+    expect(pending.transactionId).toBe('tx-no-date');
+
+    const pendingNoId = normalizeTransaction({
+      ...mockCardTransaction,
+      status: 'PDNG' as const,
+    });
+    assignFallbackTransactionIds([pendingNoId], 'acct-uid');
+    expect(pendingNoId.transactionId).toBe('');
   });
 });
 

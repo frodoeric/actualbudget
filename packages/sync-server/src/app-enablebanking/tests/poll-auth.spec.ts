@@ -376,6 +376,8 @@ describe('Enable Banking Express routes', () => {
     });
 
     it('fetches balances and transactions, returns BankSyncResponse format', async () => {
+      // Mock getAccountDetails (card detection for an uncached account)
+      mockFetchResponse({ cash_account_type: 'CACC' });
       // Mock getBalances
       mockFetchResponse({
         balances: [
