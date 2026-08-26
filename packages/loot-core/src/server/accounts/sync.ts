@@ -36,6 +36,7 @@ import type {
 } from '#types/models';
 
 import { getStartingBalancePayee } from './payees';
+import { shiftToStatementMonth } from './statement-month';
 import { title } from './title';
 
 function BankSyncError(type: string, code: string, details?: object) {
@@ -495,7 +496,13 @@ async function normalizeTransactions(
 async function normalizeBankSyncTransactions(transactions, acctId) {
   const payeesToCreate = new Map();
 
-  const [customMappingsRaw, importPending, importNotes] = await Promise.all([
+  const [
+    customMappingsRaw,
+    importPending,
+    importNotes,
+    statementMonth,
+    statementClosingDay,
+  ] = await Promise.all([
     aqlQuery(
       q('preferences')
         .filter({ id: `custom-sync-mappings-${acctId}` })
@@ -511,6 +518,19 @@ async function normalizeBankSyncTransactions(transactions, acctId) {
         .filter({ id: `sync-import-notes-${acctId}` })
         .select('value'),
     ).then(data => String(data?.data?.[0]?.value ?? 'true') === 'true'),
+    aqlQuery(
+      q('preferences')
+        .filter({ id: `sync-statement-month-${acctId}` })
+        .select('value'),
+    ).then(data => String(data?.data?.[0]?.value ?? 'false') === 'true'),
+    aqlQuery(
+      q('preferences')
+        .filter({ id: `sync-statement-closing-day-${acctId}` })
+        .select('value'),
+    ).then(data => {
+      const day = parseInt(String(data?.data?.[0]?.value ?? '31'), 10);
+      return Number.isFinite(day) ? day : 31;
+    }),
   ]);
 
   const mappings = customMappingsRaw
@@ -530,7 +550,7 @@ async function normalizeBankSyncTransactions(transactions, acctId) {
 
     const mapping = mappings.get(trans.amount <= 0 ? 'payment' : 'deposit');
 
-    const date = trans[mapping.get('date')] ?? trans.date;
+    let date = trans[mapping.get('date')] ?? trans.date;
     const payeeName = trans[mapping.get('payee')] ?? trans.payeeName;
     const notes = trans[mapping.get('notes')];
 
@@ -538,6 +558,12 @@ async function normalizeBankSyncTransactions(transactions, acctId) {
     // layer does better validation, but this will give nicer errors
     if (date == null) {
       throw new Error('`date` is required when adding a transaction');
+    }
+
+    // Statement-month budgeting: date card purchases in the month of the
+    // statement that bills them instead of the purchase month.
+    if (statementMonth) {
+      date = shiftToStatementMonth(date, statementClosingDay);
     }
 
     if (payeeName == null) {

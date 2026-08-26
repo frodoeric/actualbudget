@@ -4,6 +4,7 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
 import { SvgQuestion } from '@actual-app/components/icons/v1';
+import { Input } from '@actual-app/components/input';
 import { SpaceBetween } from '@actual-app/components/space-between';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -155,6 +156,10 @@ type BankSyncCheckboxOptionsProps = {
   setImportTransactions: (value: boolean) => void;
   updateDates: boolean;
   setUpdateDates: (value: boolean) => void;
+  statementMonth: boolean;
+  setStatementMonth: (value: boolean) => void;
+  statementClosingDay: string;
+  setStatementClosingDay: (value: string) => void;
   helpMode?: 'desktop' | 'mobile';
 };
 
@@ -169,6 +174,10 @@ export function BankSyncCheckboxOptions({
   setImportTransactions,
   updateDates,
   setUpdateDates,
+  statementMonth,
+  setStatementMonth,
+  statementClosingDay,
+  setStatementClosingDay,
   helpMode = 'desktop',
 }: BankSyncCheckboxOptionsProps) {
   const { t } = useTranslation();
@@ -220,6 +229,42 @@ export function BankSyncCheckboxOptions({
       >
         <Trans>Update Dates</Trans>
       </CheckboxOptionWithHelp>
+
+      <CheckboxOptionWithHelp
+        id="form_statement_month"
+        checked={statementMonth}
+        onChange={() => setStatementMonth(!statementMonth)}
+        disabled={!importTransactions}
+        helpText={t(
+          'Date imported transactions in the month of the card statement that bills them instead of the purchase month. Purchases up to the closing day are billed next month; purchases after it are billed the month after that. Useful for credit cards where you budget by statement.',
+        )}
+        helpMode={helpMode}
+      >
+        <Trans>Date purchases to the statement month</Trans>
+      </CheckboxOptionWithHelp>
+
+      {statementMonth && (
+        <SpaceBetween
+          gap={8}
+          style={{
+            marginBottom: 5,
+            marginLeft: helpMode === 'desktop' ? 21 : 0,
+          }}
+        >
+          <Text>
+            <Trans>Statement closing day</Trans>
+          </Text>
+          <Input
+            id="form_statement_closing_day"
+            type="number"
+            min={1}
+            max={31}
+            value={statementClosingDay}
+            onChangeValue={setStatementClosingDay}
+            style={{ width: 60 }}
+          />
+        </SpaceBetween>
+      )}
 
       <CheckboxOptionWithHelp
         id="form_import_transactions"

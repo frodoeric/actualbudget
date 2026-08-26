@@ -35,6 +35,11 @@ export function useBankSyncAccountSettings(accountId: string) {
   const [savedUpdateDates = false, setSavedUpdateDates] = useSyncedPref(
     `sync-update-dates-${accountId}`,
   );
+  const [savedStatementMonth = false, setSavedStatementMonth] = useSyncedPref(
+    `sync-statement-month-${accountId}`,
+  );
+  const [savedStatementClosingDay = '31', setSavedStatementClosingDay] =
+    useSyncedPref(`sync-statement-closing-day-${accountId}`);
 
   const [transactionDirection, setTransactionDirection] =
     useState<TransactionDirection>('payment');
@@ -55,6 +60,12 @@ export function useBankSyncAccountSettings(accountId: string) {
   );
   const [updateDates, setUpdateDates] = useState(
     String(savedUpdateDates) === 'true',
+  );
+  const [statementMonth, setStatementMonth] = useState(
+    String(savedStatementMonth) === 'true',
+  );
+  const [statementClosingDay, setStatementClosingDay] = useState(
+    String(savedStatementClosingDay),
   );
 
   const transactionQuery = q('transactions')
@@ -92,6 +103,14 @@ export function useBankSyncAccountSettings(accountId: string) {
     setSavedReimportDeleted(String(reimportDeleted));
     setSavedImportTransactions(String(importTransactions));
     setSavedUpdateDates(String(updateDates));
+    setSavedStatementMonth(String(statementMonth));
+
+    // Clamp to a valid day of month; fall back to end-of-month close.
+    const day = parseInt(statementClosingDay, 10);
+    const clampedDay = Number.isFinite(day)
+      ? Math.min(Math.max(day, 1), 31)
+      : 31;
+    setSavedStatementClosingDay(String(clampedDay));
   };
 
   const setMapping = (field: string, value: string) => {
@@ -120,6 +139,10 @@ export function useBankSyncAccountSettings(accountId: string) {
     setImportTransactions,
     updateDates,
     setUpdateDates,
+    statementMonth,
+    setStatementMonth,
+    statementClosingDay,
+    setStatementClosingDay,
     mappings,
     setMapping,
     exampleTransaction,

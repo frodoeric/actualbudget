@@ -39,6 +39,10 @@ export function MobileBankSyncAccountEditPage() {
     setImportTransactions,
     updateDates,
     setUpdateDates,
+    statementMonth,
+    setStatementMonth,
+    statementClosingDay,
+    setStatementClosingDay,
     mappings,
     setMapping,
     fields,
@@ -155,6 +159,10 @@ export function MobileBankSyncAccountEditPage() {
               setImportTransactions={setImportTransactions}
               updateDates={updateDates}
               setUpdateDates={setUpdateDates}
+              statementMonth={statementMonth}
+              setStatementMonth={setStatementMonth}
+              statementClosingDay={statementClosingDay}
+              setStatementClosingDay={setStatementClosingDay}
               helpMode="mobile"
             />
           </View>
