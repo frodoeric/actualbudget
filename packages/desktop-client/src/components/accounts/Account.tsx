@@ -819,6 +819,7 @@ class AccountInternal extends PureComponent<
       | 'remove-sorting'
       | 'toggle-reconciled'
       | 'filter-duplicates'
+      | 'merge-duplicates'
       | 'toggle-net-worth-chart'
       | 'manage-columns',
   ) => {
@@ -917,6 +918,63 @@ class AccountInternal extends PureComponent<
           customName: t('Possible duplicates'),
           queryFilter: { id: { $oneof: ids } },
         });
+        break;
+      }
+      case 'merge-duplicates': {
+        const scopedAccountId =
+          accountId && !SPECIAL_VIEW_IDS.includes(accountId)
+            ? accountId
+            : undefined;
+
+        const result = await send('transactions-merge-duplicates', {
+          accountId: scopedAccountId,
+        });
+
+        if (result.mergedCount > 0) {
+          await this.refetchTransactions();
+        }
+
+        if (result.mergedCount === 0 && result.skippedCount === 0) {
+          this.props.dispatch(
+            addNotification({
+              notification: {
+                type: 'message',
+                message: t('No duplicate transactions found.'),
+              },
+            }),
+          );
+          break;
+        }
+
+        this.props.dispatch(
+          addNotification({
+            notification: {
+              type: 'message',
+              message:
+                result.skippedCount > 0
+                  ? t(
+                      'Merged {{count}} duplicate transactions. {{skipped}} possible duplicates need manual review.',
+                      {
+                        count: result.mergedCount,
+                        skipped: result.skippedCount,
+                      },
+                    )
+                  : t('Merged {{count}} duplicate transactions.', {
+                      count: result.mergedCount,
+                    }),
+            },
+          }),
+        );
+
+        if (result.skippedCount > 0) {
+          const remainingIds = await send('transactions-find-duplicates', {
+            accountId: scopedAccountId,
+          });
+          void this.onApplyFilter({
+            customName: t('Possible duplicates'),
+            queryFilter: { id: { $oneof: remainingIds } },
+          });
+        }
         break;
       }
       case 'toggle-net-worth-chart':

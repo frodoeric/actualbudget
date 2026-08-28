@@ -17,6 +17,7 @@ import { findDuplicateTransactions } from './find-duplicates';
 import { parseFile } from './import/parse-file';
 import type { ParseFileOptions } from './import/parse-file';
 import { mergeTransactions } from './merge';
+import { mergeDuplicateTransactions } from './merge-duplicates';
 
 import { batchUpdateTransactions } from '.';
 
@@ -31,6 +32,7 @@ export type TransactionHandlers = {
   'transactions-export-query': typeof exportTransactionsQuery;
   'transactions-merge': typeof mergeTransactions;
   'transactions-find-duplicates': typeof findDuplicateTransactions;
+  'transactions-merge-duplicates': typeof mergeDuplicateTransactions;
   'get-earliest-transaction': typeof getEarliestTransaction;
   'get-latest-transaction': typeof getLatestTransaction;
 };
@@ -160,6 +162,10 @@ app.method(
 );
 app.method('transactions-merge', mutator(undoable(mergeTransactions)));
 app.method('transactions-find-duplicates', findDuplicateTransactions);
+app.method(
+  'transactions-merge-duplicates',
+  mutator(undoable(mergeDuplicateTransactions)),
+);
 
 app.method('transaction-add', mutator(addTransaction));
 app.method('transaction-update', mutator(updateTransaction));
