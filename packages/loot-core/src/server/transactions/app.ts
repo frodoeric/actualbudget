@@ -13,6 +13,7 @@ import type {
 } from '#types/models';
 
 import { exportQueryToCSV, exportToCSV } from './export/export-to-csv';
+import { findDuplicateTransactions } from './find-duplicates';
 import { parseFile } from './import/parse-file';
 import type { ParseFileOptions } from './import/parse-file';
 import { mergeTransactions } from './merge';
@@ -29,6 +30,7 @@ export type TransactionHandlers = {
   'transactions-export': typeof exportTransactions;
   'transactions-export-query': typeof exportTransactionsQuery;
   'transactions-merge': typeof mergeTransactions;
+  'transactions-find-duplicates': typeof findDuplicateTransactions;
   'get-earliest-transaction': typeof getEarliestTransaction;
   'get-latest-transaction': typeof getLatestTransaction;
 };
@@ -157,6 +159,7 @@ app.method(
   mutator(undoable(handleBatchUpdateTransactions)),
 );
 app.method('transactions-merge', mutator(undoable(mergeTransactions)));
+app.method('transactions-find-duplicates', findDuplicateTransactions);
 
 app.method('transaction-add', mutator(addTransaction));
 app.method('transaction-update', mutator(updateTransaction));
