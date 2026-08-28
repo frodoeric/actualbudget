@@ -551,6 +551,10 @@ export function AccountHeader({
                           name: 'filter-duplicates',
                           text: t('Filter duplicate transactions'),
                         },
+                        {
+                          name: 'merge-duplicates',
+                          text: t('Merge duplicate transactions'),
+                        },
                       ]}
                     />
                   </Dialog>
@@ -736,6 +740,7 @@ type AccountMenuProps = {
       | 'remove-sorting'
       | 'toggle-reconciled'
       | 'filter-duplicates'
+      | 'merge-duplicates'
       | 'toggle-net-worth-chart'
       | 'manage-columns',
   ) => void;
@@ -786,6 +791,10 @@ function AccountMenu({
         {
           name: 'filter-duplicates',
           text: t('Filter duplicate transactions'),
+        },
+        {
+          name: 'merge-duplicates',
+          text: t('Merge duplicate transactions'),
         },
         { name: 'export', text: t('Export') },
         ...(account && !account.closed

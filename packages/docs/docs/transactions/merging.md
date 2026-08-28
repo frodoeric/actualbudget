@@ -28,3 +28,13 @@ If no possible duplicates are found, Actual shows a notification instead of appl
 :::note
 Recurring transactions posted from the same [schedule](../schedules.md) repeat the same amount on purpose, so they are not treated as duplicates of each other.
 :::
+
+### Merging All Duplicates at Once
+
+If you have a lot of duplicates to clean up — for example, after accidentally duplicating a batch of transactions — you don't have to merge them one pair at a time.
+
+1. Open the same menu (the three vertical dots) and select **Merge duplicate transactions**.
+2. Actual merges every duplicate it's confident about: transactions that share the bank's own transaction id, and any isolated pair with a matching amount and date. A message tells you how many were merged.
+3. If three or more transactions with the same amount fall within a few days of each other, Actual leaves them alone instead of guessing which ones to merge — that pattern is just as likely to be normal recurring spending (like a weekly grocery run) as it is duplicates. Use **Filter duplicate transactions** to review and merge those manually.
+
+If the result doesn't look right, press <Key mod="ctrl" k="z" /> right away — the whole merge undoes in a single step, just like [any other undo](../getting-started/tips-tricks.md#undo-redo).

@@ -1,6 +1,9 @@
 import * as db from '#server/db';
 
-import { findDuplicateTransactions } from './find-duplicates';
+import {
+  findDuplicateTransactions,
+  findMergeableDuplicateGroups,
+} from './find-duplicates';
 
 beforeEach(global.emptyDatabase());
 afterEach(global.emptyDatabase());
@@ -292,5 +295,190 @@ describe('findDuplicateTransactions', () => {
     expect(
       (await findDuplicateTransactions({ accountId: 'two' })).sort(),
     ).toEqual([t1, t2].sort());
+  });
+});
+
+describe('findMergeableDuplicateGroups', () => {
+  beforeEach(prepareDatabase);
+
+  it('returns nothing when there are no transactions', async () => {
+    expect(await findMergeableDuplicateGroups()).toEqual({
+      importedIdGroups: [],
+      fuzzyPairs: [],
+      skippedFuzzyGroups: 0,
+    });
+  });
+
+  it('groups all transactions sharing an imported id, any size', async () => {
+    const t1 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    const t2 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    const t3 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups.length).toBe(1);
+    expect(result.importedIdGroups[0].sort()).toEqual([t1, t2, t3].sort());
+    expect(result.fuzzyPairs).toEqual([]);
+    expect(result.skippedFuzzyGroups).toBe(0);
+  });
+
+  it('returns an isolated fuzzy pair as mergeable', async () => {
+    const t1 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -750,
+    });
+    const t2 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-05',
+      amount: -750,
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups).toEqual([]);
+    expect(result.fuzzyPairs.length).toBe(1);
+    expect(result.fuzzyPairs[0].sort()).toEqual([t1, t2].sort());
+    expect(result.skippedFuzzyGroups).toBe(0);
+  });
+
+  it('leaves a fuzzy chain of 3+ out of fuzzyPairs and counts it as skipped', async () => {
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -5000,
+    });
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-06',
+      amount: -5000,
+    });
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-12',
+      amount: -5000,
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups).toEqual([]);
+    expect(result.fuzzyPairs).toEqual([]);
+    expect(result.skippedFuzzyGroups).toBe(1);
+  });
+
+  it('does not let a transaction already claimed by an imported-id group also pair up fuzzily', async () => {
+    const t1 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    const t2 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    // Same amount, within the fuzzy window of t1/t2, but no imported id.
+    // Should be left completely alone once t1/t2 are consumed by their
+    // imported-id group, rather than pairing with either of them.
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-02',
+      amount: -1500,
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups.length).toBe(1);
+    expect(result.importedIdGroups[0].sort()).toEqual([t1, t2].sort());
+    expect(result.fuzzyPairs).toEqual([]);
+    expect(result.skippedFuzzyGroups).toBe(0);
+  });
+
+  it('does not pair postings of the same schedule', async () => {
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      schedule: 'sched1',
+    });
+    await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-08',
+      amount: -1500,
+      schedule: 'sched1',
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups).toEqual([]);
+    expect(result.fuzzyPairs).toEqual([]);
+    expect(result.skippedFuzzyGroups).toBe(0);
+  });
+
+  it('finds an unrelated imported-id pair and fuzzy pair independently', async () => {
+    const t1 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    const t2 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-01-01',
+      amount: -1500,
+      imported_id: 'bank-1',
+    });
+    const t3 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-02-01',
+      amount: -300,
+    });
+    const t4 = await db.insertTransaction({
+      account: 'one',
+      date: '2025-02-03',
+      amount: -300,
+    });
+
+    const result = await findMergeableDuplicateGroups();
+    expect(result.importedIdGroups.length).toBe(1);
+    expect(result.importedIdGroups[0].sort()).toEqual([t1, t2].sort());
+    expect(result.fuzzyPairs.length).toBe(1);
+    expect(result.fuzzyPairs[0].sort()).toEqual([t3, t4].sort());
+    expect(result.skippedFuzzyGroups).toBe(0);
+  });
+
+  it('scopes results to the requested account', async () => {
+    const t1 = await db.insertTransaction({
+      account: 'two',
+      date: '2025-01-01',
+      amount: -1500,
+    });
+    const t2 = await db.insertTransaction({
+      account: 'two',
+      date: '2025-01-05',
+      amount: -1500,
+    });
+
+    expect(await findMergeableDuplicateGroups({ accountId: 'one' })).toEqual({
+      importedIdGroups: [],
+      fuzzyPairs: [],
+      skippedFuzzyGroups: 0,
+    });
+
+    const result = await findMergeableDuplicateGroups({ accountId: 'two' });
+    expect(result.fuzzyPairs.length).toBe(1);
+    expect(result.fuzzyPairs[0].sort()).toEqual([t1, t2].sort());
   });
 });
