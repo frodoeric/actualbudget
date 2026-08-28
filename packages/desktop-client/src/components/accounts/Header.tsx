@@ -547,6 +547,10 @@ export function AccountHeader({
                           name: 'manage-columns',
                           text: t('Manage table columns'),
                         },
+                        {
+                          name: 'filter-duplicates',
+                          text: t('Filter duplicate transactions'),
+                        },
                       ]}
                     />
                   </Dialog>
@@ -731,6 +735,7 @@ type AccountMenuProps = {
       | 'export'
       | 'remove-sorting'
       | 'toggle-reconciled'
+      | 'filter-duplicates'
       | 'toggle-net-worth-chart'
       | 'manage-columns',
   ) => void;
@@ -777,6 +782,10 @@ function AccountMenu({
           text: showReconciled
             ? t('Hide reconciled transactions')
             : t('Show reconciled transactions'),
+        },
+        {
+          name: 'filter-duplicates',
+          text: t('Filter duplicate transactions'),
         },
         { name: 'export', text: t('Export') },
         ...(account && !account.closed

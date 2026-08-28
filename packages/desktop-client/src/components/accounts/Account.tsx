@@ -818,6 +818,7 @@ class AccountInternal extends PureComponent<
       | 'export'
       | 'remove-sorting'
       | 'toggle-reconciled'
+      | 'filter-duplicates'
       | 'toggle-net-worth-chart'
       | 'manage-columns',
   ) => {
@@ -892,6 +893,32 @@ class AccountInternal extends PureComponent<
           );
         }
         break;
+      case 'filter-duplicates': {
+        const ids = await send('transactions-find-duplicates', {
+          accountId:
+            accountId && !SPECIAL_VIEW_IDS.includes(accountId)
+              ? accountId
+              : undefined,
+        });
+
+        if (ids.length === 0) {
+          this.props.dispatch(
+            addNotification({
+              notification: {
+                type: 'message',
+                message: t('No duplicate transactions found.'),
+              },
+            }),
+          );
+          break;
+        }
+
+        void this.onApplyFilter({
+          customName: t('Possible duplicates'),
+          queryFilter: { id: { $oneof: ids } },
+        });
+        break;
+      }
       case 'toggle-net-worth-chart':
         if (this.props.showNetWorthChart) {
           this.props.setShowNetWorthChart(false);

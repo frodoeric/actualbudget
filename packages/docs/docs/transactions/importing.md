@@ -56,3 +56,5 @@ When "Merge with existing transactions" is enabled, a **Reimport deleted transac
 :::note
 The [API](../api/reference.md#importtransactions) defaults `reimportDeleted` to `true` for backward compatibility. If you are importing via the API and want to skip deleted transactions, pass `reimportDeleted: false` explicitly.
 :::
+
+If duplicate transactions have already made it into your budget, you can [find and merge them](./merging.md#finding-duplicate-transactions).
