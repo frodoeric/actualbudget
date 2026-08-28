@@ -309,20 +309,20 @@ describe('pickStartingBalance', () => {
     expect(pickStartingBalance([], false)).toBe(0);
   });
 
-  it('derives the card debt from available credit minus limit (ActivoBank shape)', () => {
+  it('derives the card debt from available credit minus limit', () => {
     const balances = mockCardBalancesAvailableCredit.map(normalizeBalance);
-    // ITAV 2430.66 − OTHR 5000 → −2569.34 owed
-    expect(pickStartingBalance(balances, true)).toBe(-256934);
+    // ITAV 700 − OTHR 1000 → −300 owed
+    expect(pickStartingBalance(balances, true)).toBe(-30000);
   });
 
-  it('anchors a card at 0 when every balance is positive (Santander shape)', () => {
+  it('anchors a card at 0 when every balance is positive', () => {
     const balances = mockCardBalancesAllPositive.map(normalizeBalance);
     expect(pickStartingBalance(balances, true)).toBe(0);
   });
 
   it('uses a negative booked balance as the card debt when reported', () => {
     const balances = mockCardBalancesWithDebt.map(normalizeBalance);
-    expect(pickStartingBalance(balances, true)).toBe(-12345);
+    expect(pickStartingBalance(balances, true)).toBe(-15000);
   });
 });
 
