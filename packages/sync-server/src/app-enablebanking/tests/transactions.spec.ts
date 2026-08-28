@@ -142,8 +142,8 @@ describe('POST /transactions for card accounts', () => {
       .send({ accountId: 'card-acc-1', startDate: '2026-08-01' });
 
     expect(res.body.status).toBe('ok');
-    // ITAV 2430.66 − OTHR 5000 (the limit) → −2569.34 owed
-    expect(res.body.data.startingBalance).toBe(-256934);
+    // ITAV 700 − OTHR 1000 (the limit) → −300 owed
+    expect(res.body.data.startingBalance).toBe(-30000);
   });
 
   it('anchors at 0 when the bank repeats the available amount in every type', async () => {
@@ -184,8 +184,8 @@ describe('POST /transactions for card accounts', () => {
       cardAwareSync: false,
     });
 
-    // Old behavior: first balance wins (548.70) and dates stay booking dates
-    expect(res.body.data.startingBalance).toBe(54870);
+    // Old behavior: first balance wins (400.00) and dates stay booking dates
+    expect(res.body.data.startingBalance).toBe(40000);
     const [tx] = res.body.data.transactions.all;
     expect(tx.date).toBe('2026-08-23');
     // Card detection is skipped entirely
@@ -204,8 +204,8 @@ describe('POST /transactions for card accounts', () => {
       .post('/transactions')
       .send({ accountId: 'checking-acc-1', startDate: '2026-08-01' });
 
-    // CLAV wins for regular accounts (548.70 → 54870 cents)
-    expect(res.body.data.startingBalance).toBe(54870);
+    // CLAV wins for regular accounts (400.00 → 40000 cents)
+    expect(res.body.data.startingBalance).toBe(40000);
     const [tx] = res.body.data.transactions.all;
     expect(tx.date).toBe('2026-08-23');
   });

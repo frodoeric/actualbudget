@@ -333,8 +333,8 @@ const CARD_DEBT_BALANCE_TYPES = ['CLBD', 'XPCD', 'ITBD'];
  * the first reported balance.
  *
  * Card accounts can't trust positive balances: banks report the *available
- * credit* there (e.g. ActivoBank sends ITAV = remaining limit and OTHR = the
- * credit limit itself; Santander repeats the available amount in every type).
+ * credit* there (e.g. some banks send ITAV = remaining limit and OTHR = the
+ * credit limit itself; others repeat the available amount in every type).
  * Treating that as money inflates the budget with funds the user doesn't
  * have. For cards, in order:
  *
@@ -377,8 +377,8 @@ export function pickStartingBalance(
 }
 
 /**
- * Some banks (e.g. Santander Totta cards) return transactions with neither
- * entry_reference nor transaction_id. Without an import id, Actual's client
+ * Some banks' card transactions come back with neither entry_reference nor
+ * transaction_id. Without an import id, Actual's client
  * falls back to fuzzy matching (±7 days), which breaks date updates and
  * re-imports as duplicates. Derive a deterministic id from the transaction's
  * stable fields so the same bank record always maps to the same import id.
